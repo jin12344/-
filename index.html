@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>틀린 그림 찾기</title>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+            min-height: 100vh;
+            color: #fff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding-bottom: 32px;
+        }
+
+        header {
+            text-align: center;
+            padding: 28px 16px 12px;
+            width: 100%;
+        }
+
+        h1 {
+            font-size: clamp(1.6rem, 4vw, 2.4rem);
+            background: linear-gradient(90deg, #f093fb, #f5576c);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 6px;
+            letter-spacing: -0.5px;
+        }
+
+        #game-info {
+            color: #888;
+            font-size: 0.82rem;
+            letter-spacing: 0.08em;
+            margin-bottom: 12px;
+        }
+
+        #status-bar {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        #status-text {
+            font-size: 1rem;
+            color: #ffd700;
+            font-weight: 600;
+        }
+
+        #progress-dots {
+            display: flex;
+            gap: 7px;
+        }
+
+        .dot {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            border: 2px solid #f5576c;
+            background: transparent;
+            transition: background 0.35s, border-color 0.35s, transform 0.25s;
+        }
+
+        .dot.found {
+            background: #4caf50;
+            border-color: #4caf50;
+            transform: scale(1.25);
+        }
+
+        /* ── 캔버스 영역 ── */
+        #canvases {
+            display: flex;
+            gap: 18px;
+            padding: 16px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .canvas-box {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .canvas-label {
+            font-size: 0.82rem;
+            color: #aaa;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+
+        canvas {
+            border-radius: 10px;
+            border: 2.5px solid #444;
+            display: block;
+            /* 반응형: CSS 스케일 — JS click 좌표는 getBoundingClientRect로 보정 */
+            max-width: calc(50vw - 24px);
+        }
+
+        #right-canvas {
+            border-color: #f5576c;
+            cursor: crosshair;
+        }
+        #right-canvas:hover { border-color: #f093fb; }
+
+        #loading-msg {
+            padding: 70px 20px;
+            color: #888;
+            font-size: 1.1rem;
+            text-align: center;
+        }
+
+        /* ── 버튼 ── */
+        #controls {
+            display: flex;
+            gap: 10px;
+            padding: 6px 16px 0;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        button {
+            padding: 10px 22px;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.92rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: transform 0.15s, box-shadow 0.15s;
+            letter-spacing: 0.02em;
+        }
+        button:hover  { transform: translateY(-2px); box-shadow: 0 6px 18px rgba(0,0,0,0.35); }
+        button:active { transform: translateY(0); }
+
+        #btn-hint   { background: #1e1b4b; color: #ffd700; border: 1.5px solid #ffd700; }
+        #btn-retry  { background: #3a3a3a; color: #eee; }
+        #btn-next   { background: linear-gradient(135deg, #f093fb, #f5576c); color: #fff; }
+
+        /* ── 승리 오버레이 ── */
+        #victory-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.88);
+            z-index: 300;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            gap: 18px;
+            padding: 20px;
+        }
+        #victory-overlay.active { display: flex; }
+
+        #victory-title {
+            font-size: clamp(2.2rem, 7vw, 4rem);
+            background: linear-gradient(90deg, #ffd700, #ff8c00);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        #victory-sub { color: #ccc; font-size: 1.05rem; }
+        #btn-victory-next {
+            background: linear-gradient(135deg, #f093fb, #f5576c);
+            color: #fff;
+            font-size: 1.05rem;
+            padding: 14px 34px;
+            border-radius: 10px;
+            border: none;
+            margin-top: 6px;
+        }
+
+        /* ── 모바일 세로 배치 ── */
+        @media (max-width: 768px) {
+            #canvases { flex-direction: column; gap: 12px; padding: 10px; }
+            canvas    { max-width: calc(100vw - 28px); }
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>🔍 틀린 그림 찾기</h1>
+    <div id="game-info">게임 #1 / 100</div>
+    <div id="status-bar">
+        <span id="status-text">오른쪽 그림에서 틀린 곳 5개를 찾아보세요!</span>
+        <div id="progress-dots">
+            <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+            <div class="dot"></div><div class="dot"></div>
+        </div>
+    </div>
+</header>
+
+<div id="loading-msg">🖼️ 이미지 불러오는 중...</div>
+
+<div id="canvases" style="display:none">
+    <div class="canvas-box">
+        <div class="canvas-label">📷 원본</div>
+        <canvas id="left-canvas"  width="560" height="380"></canvas>
+    </div>
+    <div class="canvas-box">
+        <div class="canvas-label">🖱️ 여기서 찾으세요!</div>
+        <canvas id="right-canvas" width="560" height="380"></canvas>
+    </div>
+</div>
+
+<div id="controls">
+    <button id="btn-hint">💡 힌트</button>
+    <button id="btn-retry">🔄 다시하기</button>
+    <button id="btn-next">▶ 다음 게임</button>
+</div>
+
+<div id="victory-overlay">
+    <div id="victory-title">🎉 성공!</div>
+    <div id="victory-sub">틀린 그림 5개를 모두 찾았어요!</div>
+    <button id="btn-victory-next">다음 게임 ▶</button>
+</div>
+
+<script>
+'use strict';
+
+/* ═══════════════════════════════════════════════
+   CONFIG
+═══════════════════════════════════════════════ */
+const IMG_W     = 560;
+const IMG_H     = 380;
+const NUM_DIFFS = 5;
+
+// 100개 Picsum 이미지 ID (무료 CDN, CORS 지원)
+const IMAGE_IDS = [
+     10,  20,  24,  26,  28,  29,  30,  31,  32,  33,
+     36,  37,  38,  39,  42,  43,  44,  45,  46,  48,
+     49,  50,  51,  52,  53,  56,  57,  58,  59,  60,
+     61,  62,  63,  64,  65,  66,  67,  68,  69,  70,
+     71,  72,  73,  74,  75,  76,  77,  78,  79,  80,
+     82,  83,  84,  85,  86,  87,  88,  89,  90,  91,
+     92,  93,  94,  95,  96,  97,  98,  99, 100, 101,
+    102, 103, 104, 105, 106, 107, 108, 110, 111, 112,
+    113, 114, 115, 116, 117, 118, 119, 120, 121, 122,
+    123, 124, 125, 126, 127, 128, 129, 130, 131, 132
+];
+
+/* ═══════════════════════════════════════════════
+   시드 기반 난수 (xorshift32)
+═══════════════════════════════════════════════ */
+function makeRng(seed) {
+    let s = (seed >>> 0) || 1;
+    return () => {
+        s ^= s << 13; s ^= s >>> 17; s ^= s << 5;
+        return (s >>> 0) / 4294967296;
+    };
+}
+
+function seededShuffle(arr, seed) {
+    const a = [...arr];
+    const rng = makeRng(seed);
+    for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(rng() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+}
+
+/* ═══════════════════════════════════════════════
+   틀린 그림 위치/효과 생성 (게임 인덱스로 결정적 생성)
+═══════════════════════════════════════════════ */
+const DIFF_TYPES   = ['tint', 'darken', 'lighten', 'invert', 'flip', 'pixelate'];
+const TINT_COLORS  = ['#FF3333','#33DD33','#3366FF','#FF9900','#EE33EE','#00CCFF','#FFEE00','#FF5500'];
+const MIN_SZ = 42, MAX_SZ = 78, MARGIN = 58;
+
+function genDifferences(gameIdx) {
+    const rng  = makeRng(gameIdx * 9301 + 49297);
+    const diffs = [];
+
+    for (let i = 0; i < NUM_DIFFS; i++) {
+        let x, y, w, h, tries = 0;
+        do {
+            w = MIN_SZ + Math.floor(rng() * (MAX_SZ - MIN_SZ));
+            h = MIN_SZ + Math.floor(rng() * (MAX_SZ - MIN_SZ));
+            x = MARGIN + Math.floor(rng() * (IMG_W - w - MARGIN * 2));
+            y = MARGIN + Math.floor(rng() * (IMG_H - h - MARGIN * 2));
+            tries++;
+        } while (tries < 60 && diffs.some(d =>
+            x < d.x + d.w + 14 && x + w + 14 > d.x &&
+            y < d.y + d.h + 14 && y + h + 14 > d.y
+        ));
+
+        diffs.push({
+            x, y, w, h,
+            type:  DIFF_TYPES[Math.floor(rng() * DIFF_TYPES.length)],
+            color: TINT_COLORS[Math.floor(rng() * TINT_COLORS.length)]
+        });
+    }
+    return diffs;
+}
+
+/* ═══════════════════════════════════════════════
+   Canvas 효과 적용
+═══════════════════════════════════════════════ */
+function applyDiff(ctx, d) {
+    const { x, y, w, h } = d;
+
+    switch (d.type) {
+        case 'tint':
+            ctx.save();
+            ctx.globalAlpha = 0.52;
+            ctx.fillStyle = d.color;
+            ctx.fillRect(x, y, w, h);
+            ctx.restore();
+            break;
+
+        case 'darken':
+            ctx.save();
+            ctx.globalAlpha = 0.58;
+            ctx.fillStyle = '#000';
+            ctx.fillRect(x, y, w, h);
+            ctx.restore();
+            break;
+
+        case 'lighten':
+            ctx.save();
+            ctx.globalAlpha = 0.60;
+            ctx.fillStyle = '#FFF';
+            ctx.fillRect(x, y, w, h);
+            ctx.restore();
+            break;
+
+        case 'invert': {
+            const id = ctx.getImageData(x, y, w, h);
+            for (let i = 0; i < id.data.length; i += 4) {
+                id.data[i]   = 255 - id.data[i];
+                id.data[i+1] = 255 - id.data[i+1];
+                id.data[i+2] = 255 - id.data[i+2];
+            }
+            ctx.putImageData(id, x, y);
+            break;
+        }
+
+        case 'flip': {
+            const id = ctx.getImageData(x, y, w, h);
+            const fl = ctx.createImageData(w, h);
+            for (let r = 0; r < h; r++) {
+                for (let c = 0; c < w; c++) {
+                    const si = (r * w + c) * 4;
+                    const di = (r * w + (w - 1 - c)) * 4;
+                    fl.data[di]   = id.data[si];
+                    fl.data[di+1] = id.data[si+1];
+                    fl.data[di+2] = id.data[si+2];
+                    fl.data[di+3] = id.data[si+3];
+                }
+            }
+            ctx.putImageData(fl, x, y);
+            break;
+        }
+
+        case 'pixelate': {
+            const ps = 12;
+            const id = ctx.getImageData(x, y, w, h);
+            for (let py = 0; py < h; py += ps) {
+                for (let px = 0; px < w; px += ps) {
+                    let r = 0, g = 0, b = 0, n = 0;
+                    for (let dy = 0; dy < ps && py + dy < h; dy++) {
+                        for (let dx = 0; dx < ps && px + dx < w; dx++) {
+                            const idx = ((py + dy) * w + (px + dx)) * 4;
+                            r += id.data[idx]; g += id.data[idx+1]; b += id.data[idx+2]; n++;
+                        }
+                    }
+                    r = r / n | 0; g = g / n | 0; b = b / n | 0;
+                    for (let dy = 0; dy < ps && py + dy < h; dy++) {
+                        for (let dx = 0; dx < ps && px + dx < w; dx++) {
+                            const idx = ((py + dy) * w + (px + dx)) * 4;
+                            id.data[idx] = r; id.data[idx+1] = g; id.data[idx+2] = b;
+                        }
+                    }
+                }
+            }
+            ctx.putImageData(id, x, y);
+            break;
+        }
+    }
+}
+
+function drawFoundMarker(ctx, d, alpha = 1) {
+    ctx.save();
+    ctx.globalAlpha   = alpha;
+    ctx.strokeStyle   = '#4CAF50';
+    ctx.lineWidth     = 3;
+    ctx.shadowColor   = '#4CAF50';
+    ctx.shadowBlur    = 12;
+    ctx.strokeRect(d.x - 5, d.y - 5, d.w + 10, d.h + 10);
+    ctx.restore();
+}
+
+/* ═══════════════════════════════════════════════
+   DOM 참조
+═══════════════════════════════════════════════ */
+const lCanvas    = document.getElementById('left-canvas');
+const rCanvas    = document.getElementById('right-canvas');
+const lCtx       = lCanvas.getContext('2d');
+const rCtx       = rCanvas.getContext('2d');
+const loadingEl  = document.getElementById('loading-msg');
+const canvasesEl = document.getElementById('canvases');
+const gameInfoEl = document.getElementById('game-info');
+const statusEl   = document.getElementById('status-text');
+const dotsEl     = document.getElementById('progress-dots');
+const victoryEl  = document.getElementById('victory-overlay');
+
+/* ═══════════════════════════════════════════════
+   게임 상태
+═══════════════════════════════════════════════ */
+const gs = {
+    order:  [],   // 셔플된 인덱스 배열
+    pos:    0,    // order 내 현재 위치
+    idx:    0,    // 현재 IMAGE_IDS 인덱스
+    diffs:  [],
+    found:  [],
+    done:   false,
+    img:    null
+};
+
+/* ═══════════════════════════════════════════════
+   게임 로직
+═══════════════════════════════════════════════ */
+function initGame() {
+    // 하루 단위 셔플 (매일 순서 다름)
+    const daySeed = Math.floor(Date.now() / 86400000);
+    gs.order = seededShuffle(IMAGE_IDS.map((_, i) => i), daySeed);
+    gs.pos   = 0;
+    startGame(gs.order[0]);
+}
+
+function startGame(gameIdx) {
+    gs.idx   = gameIdx;
+    gs.diffs = genDifferences(gameIdx);
+    gs.found = new Array(NUM_DIFFS).fill(false);
+    gs.done  = false;
+    gs.img   = null;
+    victoryEl.classList.remove('active');
+
+    gameInfoEl.textContent = `게임 #${gs.pos + 1} / ${IMAGE_IDS.length}`;
+    updateUI();
+
+    loadingEl.style.display  = 'block';
+    canvasesEl.style.display = 'none';
+
+    const img = new Image();
+    img.crossOrigin = 'anonymous';     // CORS 허용 (getImageData 사용 위해)
+
+    img.onload = () => {
+        gs.img = img;
+        loadingEl.style.display  = 'none';
+        canvasesEl.style.display = 'flex';
+        render();
+    };
+
+    img.onerror = () => {
+        loadingEl.textContent = '이미지 로드 실패, 다음으로 넘어갑니다...';
+        setTimeout(nextGame, 1400);
+    };
+
+    img.src = `https://picsum.photos/id/${IMAGE_IDS[gameIdx]}/${IMG_W}/${IMG_H}`;
+}
+
+function render() {
+    if (!gs.img) return;
+
+    // 양쪽 캔버스에 원본 그리기
+    lCtx.drawImage(gs.img, 0, 0, IMG_W, IMG_H);
+    rCtx.drawImage(gs.img, 0, 0, IMG_W, IMG_H);
+
+    // 오른쪽에만 차이 적용
+    gs.diffs.forEach(d => {
+        try { applyDiff(rCtx, d); }
+        catch (_) {
+            // CORS 제한시 getImageData 대신 단순 오버레이로 폴백
+            rCtx.save();
+            rCtx.globalAlpha = 0.50;
+            rCtx.fillStyle = d.color || '#FF3333';
+            rCtx.fillRect(d.x, d.y, d.w, d.h);
+            rCtx.restore();
+        }
+    });
+
+    // 찾은 곳 마킹
+    gs.found.forEach((f, i) => {
+        if (f) {
+            drawFoundMarker(lCtx, gs.diffs[i]);
+            drawFoundMarker(rCtx, gs.diffs[i]);
+        }
+    });
+}
+
+function updateUI() {
+    const rem = gs.found.filter(f => !f).length;
+    const fnd = NUM_DIFFS - rem;
+
+    if (gs.done) {
+        statusEl.textContent = '🎉 모두 찾았어요! 대단해요!';
+        statusEl.style.color = '#4caf50';
+    } else {
+        statusEl.textContent = `찾음: ${fnd}/5 — 남은 개수: ${rem}개`;
+        statusEl.style.color = '#ffd700';
+    }
+
+    const dots = dotsEl.querySelectorAll('.dot');
+    gs.found.forEach((f, i) => dots[i].classList.toggle('found', f));
+}
+
+/* ── 클릭 처리 ── */
+function handleClick(event) {
+    if (gs.done || !gs.img) return;
+
+    const rect = rCanvas.getBoundingClientRect();
+    const sx   = rCanvas.width  / rect.width;
+    const sy   = rCanvas.height / rect.height;
+    const cx   = (event.clientX - rect.left) * sx;
+    const cy   = (event.clientY - rect.top)  * sy;
+    const PAD  = 16;
+
+    let hit = false;
+    gs.diffs.forEach((d, i) => {
+        if (gs.found[i]) return;
+        if (cx >= d.x - PAD && cx <= d.x + d.w + PAD &&
+            cy >= d.y - PAD && cy <= d.y + d.h + PAD) {
+            gs.found[i] = true;
+            hit = true;
+        }
+    });
+
+    if (hit) {
+        render();
+        updateUI();
+        if (gs.found.every(Boolean)) {
+            gs.done = true;
+            updateUI();
+            setTimeout(() => victoryEl.classList.add('active'), 700);
+        }
+    } else {
+        showMiss(cx, cy);
+    }
+}
+
+/* ── 오답 표시 ── */
+function showMiss(cx, cy) {
+    rCtx.save();
+    rCtx.strokeStyle  = '#FF4444';
+    rCtx.lineWidth    = 2.5;
+    rCtx.globalAlpha  = 0.85;
+    rCtx.shadowColor  = '#FF4444';
+    rCtx.shadowBlur   = 8;
+    rCtx.beginPath();
+    rCtx.arc(cx, cy, 14, 0, Math.PI * 2);
+    rCtx.stroke();
+    rCtx.beginPath();
+    rCtx.moveTo(cx - 8, cy - 8); rCtx.lineTo(cx + 8, cy + 8);
+    rCtx.moveTo(cx + 8, cy - 8); rCtx.lineTo(cx - 8, cy + 8);
+    rCtx.stroke();
+    rCtx.restore();
+    setTimeout(() => render(), 480);
+}
+
+/* ── 힌트 ── */
+let hintTimer = null;
+function showHint() {
+    if (hintTimer) clearTimeout(hintTimer);
+    gs.diffs.forEach((d, i) => {
+        if (gs.found[i]) return;
+        rCtx.save();
+        rCtx.strokeStyle = '#FFD700';
+        rCtx.lineWidth   = 3;
+        rCtx.shadowColor = '#FFD700';
+        rCtx.shadowBlur  = 22;
+        rCtx.setLineDash([7, 3]);
+        rCtx.strokeRect(d.x - 7, d.y - 7, d.w + 14, d.h + 14);
+        rCtx.restore();
+    });
+    hintTimer = setTimeout(() => render(), 1800);
+}
+
+/* ── 다음 / 다시 ── */
+function nextGame() {
+    victoryEl.classList.remove('active');
+    gs.pos = (gs.pos + 1) % gs.order.length;
+    startGame(gs.order[gs.pos]);
+}
+
+function retryGame() {
+    startGame(gs.idx);
+}
+
+/* ═══════════════════════════════════════════════
+   이벤트 연결
+═══════════════════════════════════════════════ */
+rCanvas.addEventListener('click', handleClick);
+
+rCanvas.addEventListener('touchend', e => {
+    e.preventDefault();
+    const t = e.changedTouches[0];
+    handleClick({ clientX: t.clientX, clientY: t.clientY });
+}, { passive: false });
+
+document.getElementById('btn-hint').addEventListener('click', showHint);
+document.getElementById('btn-retry').addEventListener('click', retryGame);
+document.getElementById('btn-next').addEventListener('click', nextGame);
+document.getElementById('btn-victory-next').addEventListener('click', nextGame);
+
+/* ═══════════════════════════════════════════════
+   시작
+═══════════════════════════════════════════════ */
+initGame();
+</script>
+</body>
+</html>
